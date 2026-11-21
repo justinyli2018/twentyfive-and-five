@@ -33,12 +33,17 @@ On other Linux desktops, bind these commands in your system keyboard settings in
 `npm run toggle`, `npm run skip`, `npm run reset`, `npm run show-hide`, `npm run quit`.
 
 To move the overlay from a shortcut or script: `node scripts/launch.js --corner=bottom-left`
-(also `top-left`, `top-right`, `bottom-right`).
+(also `top-left`, `top-right`, `bottom-right`). Appearance: `--theme=auto`, `--theme=dark` or `--theme=light`.
 
 ## Menu
 
 Hover the overlay and click **⋯**, or use the tray / menu-bar icon (the coral dot), for:
 
+- **Appearance**: Auto, Dark or Light. **Auto** (the default) stays dark and turns light only when the screen right around the overlay is white or near-white.
+  - Windows and Linux on X11: works right away.
+  - macOS: asks for Screen Recording permission the first time you pick Auto from the menu. Until it's granted, Auto follows the system light/dark setting.
+  - Linux on Wayland: apps can't see other windows, so Auto follows the system light/dark setting.
+  - Screen images are checked in memory for brightness only; nothing is saved or sent anywhere.
 - **Glass opacity…**: opens a slider in the overlay (0% = almost clear, 100% = solid). Click ✓ or press Esc when done.
 - **Move to**: slides the overlay to any corner of its current screen
 - **Quit**
@@ -50,6 +55,14 @@ Starting or pausing plays a short click; switching between focus and break plays
 - **Windows:** clicking the overlay never takes keyboard focus away from the app you're typing in.
 - **macOS:** it runs as a floating panel with no Dock icon, stays above fullscreen apps, and shows the countdown in the menu bar.
 - **Linux:** it runs through X11/XWayland, because Wayland doesn't let apps keep themselves on top. Transparency needs a compositor; GNOME and KDE have one.
+
+## Build installers
+
+```sh
+npm run dist:linux   # AppImage + .deb  (dist:win / dist:mac on those OSes)
+```
+
+See [RELEASING.md](RELEASING.md) for publishing to GitHub Releases and app stores.
 
 ## Files
 

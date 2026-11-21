@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('overlay', {
   onGlass: cb => ipcRenderer.on('glass', (_e, glass) => cb(glass)),
   onNotice: cb => ipcRenderer.on('notice', (_e, msg) => cb(msg)),
   onGlassPanel: cb => ipcRenderer.on('glass-panel', () => cb()),
+  onTheme: cb => ipcRenderer.on('theme', (_e, theme) => cb(theme)),
   setGlass: value => ipcRenderer.send('set-glass', value),
   reportState: state => ipcRenderer.send('state', state),
   openMenu: () => ipcRenderer.send('menu'),

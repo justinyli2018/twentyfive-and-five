@@ -1,7 +1,12 @@
 {
   "name": "twentyfive-and-five",
+  "productName": "25 and 5",
   "version": "1.0.0",
   "description": "Always-on-top 25/5 study timer overlay",
+  "author": {
+    "name": "d44wn",
+    "email": "d44wn5@gmail.com"
+  },
   "main": "src/main.js",
   "private": true,
   "scripts": {
@@ -10,9 +15,72 @@
     "skip": "node scripts/launch.js --skip",
     "reset": "node scripts/launch.js --reset",
     "show-hide": "node scripts/launch.js --show-hide",
-    "quit": "node scripts/launch.js --quit"
+    "quit": "node scripts/launch.js --quit",
+    "icon": "python3 scripts/make-icon.py",
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:mas": "electron-builder --mac mas",
+    "dist:msstore": "electron-builder --win appx"
+  },
+  "build": {
+    "appId": "com.twentyfiveandfive.timer",
+    "productName": "25 and 5",
+    "copyright": "Copyright © 2026 ${author}",
+    "artifactName": "twentyfive-and-five-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        { "target": "dmg", "arch": ["universal"] },
+        { "target": "zip", "arch": ["universal"] }
+      ],
+      "hardenedRuntime": true,
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "mas": {
+      "entitlements": "build/entitlements.mas.plist",
+      "entitlementsInherit": "build/entitlements.mas.inherit.plist",
+      "provisioningProfile": "build/embedded.provisionprofile",
+      "hardenedRuntime": false
+    },
+    "appx": {
+      "applicationId": "TwentyFiveAndFive",
+      "displayName": "25 & 5",
+      "backgroundColor": "transparent"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64", "arm64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] },
+        { "target": "deb", "arch": ["x64"] }
+      ],
+      "category": "Utility",
+      "synopsis": "Always-on-top 25/5 study timer",
+      "executableArgs": ["--ozone-platform=x11"]
+    }
   },
   "devDependencies": {
-    "electron": "39.8.10"
+    "electron": "39.8.10",
+    "electron-builder": "26.18.1"
   }
 }

@@ -119,7 +119,7 @@
   function applyGlass(v) {
     v = Math.min(100, Math.max(0, Math.round(Number(v) || 0)));
     const alpha = 0.03 + (v / 100) * 0.87;               // 0% = almost clear, 100% = nearly solid
-    root.style.setProperty('--tint', `rgba(16, 18, 34, ${alpha.toFixed(3)})`);
+    root.style.setProperty('--tint-a', alpha.toFixed(3)); // colour comes from the theme
     root.style.setProperty('--glow', `${Math.round(24 + v * 0.26)}%`);
     glassSlider.value = v;
     glassSlider.style.setProperty('--fill', `${v}%`);
@@ -163,6 +163,7 @@
     window.overlay.onCommand(cmd => actions[cmd]?.());
     window.overlay.onGlass(applyGlass);
     window.overlay.onGlassPanel(openGlassPanel);
+    window.overlay.onTheme(theme => { root.dataset.theme = theme === 'light' ? 'light' : 'dark'; });
     window.overlay.onNotice(msg => { notice = msg; noticeUntil = Date.now() + 6000; render(); });
 
     window.overlay.info().then(({ platform, shortcuts }) => {

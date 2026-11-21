@@ -1,7 +1,9 @@
 'use strict';
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, Menu, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, Menu, Tray, nativeImage,
+        nativeTheme, systemPreferences } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { measureWhiteAround } = require('./background');
 
 const isMac = process.platform === 'darwin';
 const isWin = process.platform === 'win32';
@@ -10,10 +12,27 @@ const isLinux = process.platform === 'linux';
 // Linux: Wayland doesn't let apps keep themselves on top, so run through
 // X11/XWayland, where always-on-top works. Transparent visuals are needed
 // for the see-through window.
+// The display backend is picked before this file runs, so on a Wayland
+// session started without --ozone-platform=x11 (e.g. from the app menu),
+// restart once with it.
+const X11_FLAG = '--ozone-platform=x11';
+const relaunchForX11 = isLinux && !!process.env.WAYLAND_DISPLAY && !!process.env.DISPLAY &&
+  !process.argv.includes(X11_FLAG);
+if (relaunchForX11) {
+  app.relaunch({
+    // An AppImage unmounts when this process exits, so restart the AppImage
+    // file itself rather than the binary inside it.
+    ...(process.env.APPIMAGE ? { execPath: process.env.APPIMAGE } : {}),
+    args: [...process.argv.slice(1), X11_FLAG],
+  });
+  app.exit(0);
+}
 if (isLinux) {
-  app.commandLine.appendSwitch('ozone-platform', 'x11');
   app.commandLine.appendSwitch('enable-transparent-visuals');
 }
+// Keep settings in the same folder whether run from source or installed
+// (the installed app's display name would otherwise pick a new folder).
+app.setPath('userData', path.join(app.getPath('appData'), 'twentyfive-and-five'));
 // Let the chime play even when a global shortcut (not a click) started the timer.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
@@ -37,6 +56,11 @@ const CLI = {
 const W = 260;
 const H = 176;
 const MARGIN = 14; // gap between the window and the screen edge
+const THEMES = {
+  auto: 'Auto (match background)',
+  dark: 'Dark',
+  light: 'Light',
+};
 const CORNERS = {
   'top-left': 'Top left',
   'top-right': 'Top right',
@@ -46,7 +70,10 @@ const CORNERS = {
 
 let win = null;
 let tray = null;
-let settings = { glass: 45 }; // glass opacity, 0 (clear) to 100 (solid)
+let settings = {
+  glass: 45,      // glass opacity, 0 (clear) to 100 (solid)
+  theme: 'auto',  // 'auto' | 'dark' | 'light'
+};
 let state = { running: false, mode: 'focus', time: '25:00' };
 let failedShortcuts = [];
 
@@ -57,6 +84,7 @@ function loadSettings() {
   const old = { clear: 10, frosted: 45, solid: 90 }; // earlier preset names
   if (settings.glass in old) settings.glass = old[settings.glass];
   settings.glass = Number.isFinite(settings.glass) ? Math.min(100, Math.max(0, settings.glass)) : 45;
+  if (!(settings.theme in THEMES)) settings.theme = 'auto';
 }
 function saveSettings() {
   try {
@@ -127,6 +155,8 @@ function createWindow() {
 
   win.webContents.on('did-finish-load', () => {
     send('glass', settings.glass);
+    sendTheme();
+    updateAutoTheme(true);
     if (failedShortcuts.length) {
       send('notice', `Shortcut taken: ${failedShortcuts.join(', ')}`);
     }
@@ -140,11 +170,81 @@ function createWindow() {
     const [x, y] = win.getPosition();
     settings.x = x; settings.y = y;
     saveSettings();
+    updateAutoTheme();
   });
   win.on('closed', () => { win = null; });
 
   // Fullscreen apps and some window managers can drop the flag; reassert it.
   setInterval(pinOnTop, 3000);
+  // Auto appearance: re-check what's behind the overlay.
+  setInterval(() => updateAutoTheme(), 2000);
+}
+
+// ---------- appearance (dark / light / auto) ----------
+// Auto favours dark: it only turns light when the screen right around the
+// overlay is (nearly) all white, and needs a bit less white to stay light,
+// so it doesn't flicker at the boundary.
+let autoTheme = 'dark';
+let pendingTheme = null;
+let measuring = false;
+let captureFailures = 0;
+
+function currentTheme() {
+  return settings.theme === 'auto' ? autoTheme : settings.theme;
+}
+function sendTheme() {
+  send('theme', currentTheme());
+}
+
+// Can we look at the screen behind the overlay?
+function captureAllowed() {
+  // Wayland doesn't let apps see other windows (it would ask permission every time).
+  if (isLinux && process.env.WAYLAND_DISPLAY) return false;
+  // macOS needs Screen Recording permission. Ask only after the user picks Auto
+  // from the menu, never on first launch.
+  if (isMac && systemPreferences.getMediaAccessStatus('screen') !== 'granted' && !settings.askedScreenAccess) {
+    return false;
+  }
+  return captureFailures < 3; // give up after repeated failures
+}
+
+async function updateAutoTheme(immediate = false) {
+  if (settings.theme !== 'auto' || measuring || !win || win.isDestroyed() || !win.isVisible()) return;
+
+  let next;
+  if (captureAllowed()) {
+    measuring = true;
+    try {
+      const white = await measureWhiteAround(win.getBounds());
+      captureFailures = 0;
+      if (white == null) return;
+      next = white >= (autoTheme === 'light' ? 0.6 : 0.85) ? 'light' : 'dark';
+    } catch {
+      captureFailures++;
+      if (captureAllowed()) return; // try again next round
+    } finally {
+      measuring = false;
+    }
+  }
+  // No screen access: follow the system's light/dark setting instead.
+  if (!next) next = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+
+  if (next === autoTheme) { pendingTheme = null; return; }
+  // Require two readings in a row before switching (ignores brief flashes).
+  if (!immediate && pendingTheme !== next) { pendingTheme = next; return; }
+  pendingTheme = null;
+  autoTheme = next;
+  sendTheme();
+}
+
+function setTheme(theme) {
+  settings.theme = theme;
+  if (theme === 'auto' && isMac) settings.askedScreenAccess = true;
+  captureFailures = 0;
+  saveSettings();
+  sendTheme();
+  updateAutoTheme(true);
+  refreshTray();
 }
 
 function pinOnTop() {
@@ -184,6 +284,7 @@ function slideToCorner(corner) {
       slideTimer = null;
       settings.x = tx; settings.y = ty;
       saveSettings();
+      updateAutoTheme(true); // new spot, new background
     }
   }, 1000 / 60);
 }
@@ -211,6 +312,8 @@ function runArgs(argv) {
     if (CLI[a]) command(CLI[a]);
     const m = /^--corner=(.+)$/.exec(a); // e.g. --corner=bottom-left
     if (m && CORNERS[m[1]]) slideToCorner(m[1]);
+    const t = /^--theme=(.+)$/.exec(a); // e.g. --theme=light
+    if (t && THEMES[t[1]]) setTheme(t[1]);
   }
 }
 
@@ -252,6 +355,15 @@ function buildMenu() {
     { label: 'Reset', ...shortcut('reset'), click: () => command('reset') },
     { label: win && win.isVisible() ? 'Hide overlay' : 'Show overlay', ...shortcut('visibility'), click: toggleVisibility },
     { type: 'separator' },
+    {
+      label: 'Appearance',
+      submenu: Object.entries(THEMES).map(([theme, label]) => ({
+        label,
+        type: 'radio',
+        checked: settings.theme === theme,
+        click: () => setTheme(theme),
+      })),
+    },
     {
       label: 'Glass opacity…',
       click: () => { if (win && !win.isVisible()) reveal(); send('glass-panel'); },
@@ -303,17 +415,19 @@ ipcMain.on('set-glass', (_e, value) => {
 ipcMain.handle('info', () => ({ platform: process.platform, shortcuts: SHORTCUTS }));
 
 // ---------- app lifecycle ----------
-const gotLock = app.requestSingleInstanceLock({ argv: process.argv });
+// (Skip the lock while relaunching, so the restarted copy can take it.)
+const gotLock = !relaunchForX11 && app.requestSingleInstanceLock({ argv: process.argv });
 
 if (!gotLock) {
   // Already running: the first instance receives our args and acts on them.
-  app.quit();
+  if (!relaunchForX11) app.quit();
 } else {
   app.on('second-instance', (_e, argv, _cwd, extra) => runArgs((extra && extra.argv) || argv));
 
   app.whenReady().then(() => {
     if (isMac && app.dock) app.dock.hide(); // overlay-only app, no Dock icon
     loadSettings();
+    nativeTheme.on('updated', () => updateAutoTheme(true));
     registerShortcuts();
     createTray();
     // Linux compositors sometimes paint a transparent window black if it's
