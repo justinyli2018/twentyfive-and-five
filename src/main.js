@@ -36,11 +36,17 @@ const CLI = {
 
 const W = 260;
 const H = 176;
-const GLASS = ['clear', 'frosted', 'solid'];
+const MARGIN = 14; // gap between the window and the screen edge
+const CORNERS = {
+  'top-left': 'Top left',
+  'top-right': 'Top right',
+  'bottom-left': 'Bottom left',
+  'bottom-right': 'Bottom right',
+};
 
 let win = null;
 let tray = null;
-let settings = { glass: 'frosted' };
+let settings = { glass: 45 }; // glass opacity, 0 (clear) to 100 (solid)
 let state = { running: false, mode: 'focus', time: '25:00' };
 let failedShortcuts = [];
 
@@ -48,7 +54,9 @@ let failedShortcuts = [];
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 function loadSettings() {
   try { settings = { ...settings, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; } catch {}
-  if (!GLASS.includes(settings.glass)) settings.glass = 'frosted';
+  const old = { clear: 10, frosted: 45, solid: 90 }; // earlier preset names
+  if (settings.glass in old) settings.glass = old[settings.glass];
+  settings.glass = Number.isFinite(settings.glass) ? Math.min(100, Math.max(0, settings.glass)) : 45;
 }
 function saveSettings() {
   try {
@@ -57,9 +65,15 @@ function saveSettings() {
   } catch {}
 }
 
+function cornerPosition(corner, display = screen.getPrimaryDisplay()) {
+  const wa = display.workArea;
+  return {
+    x: corner.endsWith('left') ? wa.x + MARGIN : wa.x + wa.width - W - MARGIN,
+    y: corner.startsWith('top') ? wa.y + MARGIN : wa.y + wa.height - H - MARGIN,
+  };
+}
 function defaultPosition() {
-  const wa = screen.getPrimaryDisplay().workArea;
-  return { x: wa.x + wa.width - W - 24, y: wa.y + 24 };
+  return cornerPosition('top-right');
 }
 function startPosition() {
   if (Number.isFinite(settings.x) && Number.isFinite(settings.y)) {
@@ -122,6 +136,7 @@ function createWindow() {
   // Something else grabbed the top spot: take it back.
   win.on('blur', pinOnTop);
   win.on('moved', () => {
+    if (slideTimer) return; // slideTo saves the final spot itself
     const [x, y] = win.getPosition();
     settings.x = x; settings.y = y;
     saveSettings();
@@ -148,6 +163,31 @@ function reveal() {
   pinOnTop();
 }
 
+// Glide the window to a corner of the screen it's currently on.
+let slideTimer = null;
+function slideToCorner(corner) {
+  if (!win) return;
+  const display = screen.getDisplayMatching(win.getBounds());
+  const { x: tx, y: ty } = cornerPosition(corner, display);
+  const [sx, sy] = win.getPosition();
+  const start = Date.now();
+  const duration = 420;
+  clearInterval(slideTimer);
+  slideTimer = setInterval(() => {
+    if (!win || win.isDestroyed()) { clearInterval(slideTimer); slideTimer = null; return; }
+    const t = Math.min(1, (Date.now() - start) / duration);
+    const e = 1 - Math.pow(1 - t, 3); // ease-out
+    // setBounds (not setPosition) so the size can't drift on scaled displays.
+    win.setBounds({ x: Math.round(sx + (tx - sx) * e), y: Math.round(sy + (ty - sy) * e), width: W, height: H });
+    if (t === 1) {
+      clearInterval(slideTimer);
+      slideTimer = null;
+      settings.x = tx; settings.y = ty;
+      saveSettings();
+    }
+  }, 1000 / 60);
+}
+
 function send(channel, ...args) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, ...args);
 }
@@ -167,7 +207,11 @@ function command(cmd) {
 }
 
 function runArgs(argv) {
-  for (const a of argv || []) if (CLI[a]) command(CLI[a]);
+  for (const a of argv || []) {
+    if (CLI[a]) command(CLI[a]);
+    const m = /^--corner=(.+)$/.exec(a); // e.g. --corner=bottom-left
+    if (m && CORNERS[m[1]]) slideToCorner(m[1]);
+  }
 }
 
 // ---------- shortcuts ----------
@@ -209,21 +253,15 @@ function buildMenu() {
     { label: win && win.isVisible() ? 'Hide overlay' : 'Show overlay', ...shortcut('visibility'), click: toggleVisibility },
     { type: 'separator' },
     {
-      label: 'Glass',
-      submenu: GLASS.map(g => ({
-        label: g[0].toUpperCase() + g.slice(1),
-        type: 'radio',
-        checked: settings.glass === g,
-        click: () => { settings.glass = g; saveSettings(); send('glass', g); refreshTray(); },
-      })),
+      label: 'Glass opacity…',
+      click: () => { if (win && !win.isVisible()) reveal(); send('glass-panel'); },
     },
     {
-      label: 'Move to corner',
-      click: () => {
-        if (!win) return;
-        const p = defaultPosition();
-        win.setPosition(p.x, p.y);
-      },
+      label: 'Move to',
+      submenu: Object.entries(CORNERS).map(([corner, label]) => ({
+        label,
+        click: () => slideToCorner(corner),
+      })),
     },
     { type: 'separator' },
     { label: 'Quit 25 & 5', click: () => app.quit() },
@@ -255,6 +293,12 @@ ipcMain.on('state', (_e, s) => {
 });
 ipcMain.on('menu', () => {
   if (win) buildMenu().popup({ window: win });
+});
+ipcMain.on('set-glass', (_e, value) => {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return;
+  settings.glass = Math.min(100, Math.max(0, Math.round(v)));
+  saveSettings();
 });
 ipcMain.handle('info', () => ({ platform: process.platform, shortcuts: SHORTCUTS }));
 

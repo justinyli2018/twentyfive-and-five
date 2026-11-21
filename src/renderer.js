@@ -7,7 +7,9 @@
 
   const $ = id => document.getElementById(id);
   const card = $('card'), modeEl = $('mode'), timeEl = $('time'), progress = $('progress'),
-        toggleBtn = $('toggleBtn'), skipBtn = $('skipBtn'), resetBtn = $('resetBtn'), menuBtn = $('menuBtn');
+        toggleBtn = $('toggleBtn'), skipBtn = $('skipBtn'), resetBtn = $('resetBtn'), menuBtn = $('menuBtn'),
+        glassPanel = $('glassPanel'), glassSlider = $('glassSlider'), glassValue = $('glassValue'),
+        glassDone = $('glassDone');
 
   let mode = 'focus', running = false, remaining = DUR.focus, endAt = 0;
   let notice = '', noticeUntil = 0;
@@ -21,6 +23,7 @@
       endAt = Date.now() + remaining;
       running = true;
     }
+    tick(running);
     render();
   }
 
@@ -94,6 +97,47 @@
     });
   }
 
+  // Short tactile tick for start/pause: brighter when starting, lower when pausing.
+  function tick(starting) {
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume();
+    const t0 = ctx.currentTime;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(starting ? 1500 : 950, t0);
+    o.frequency.exponentialRampToValueAtTime(starting ? 750 : 420, t0 + 0.05);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.32, t0 + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.07);
+    o.connect(g).connect(ctx.destination);
+    o.start(t0);
+    o.stop(t0 + 0.09);
+  }
+
+  // ---- glass opacity ----
+  const root = document.documentElement;
+  function applyGlass(v) {
+    v = Math.min(100, Math.max(0, Math.round(Number(v) || 0)));
+    const alpha = 0.03 + (v / 100) * 0.87;               // 0% = almost clear, 100% = nearly solid
+    root.style.setProperty('--tint', `rgba(16, 18, 34, ${alpha.toFixed(3)})`);
+    root.style.setProperty('--glow', `${Math.round(24 + v * 0.26)}%`);
+    glassSlider.value = v;
+    glassSlider.style.setProperty('--fill', `${v}%`);
+    glassValue.textContent = `${v}%`;
+  }
+  function openGlassPanel() {
+    glassPanel.hidden = false;
+    card.classList.add('editing');
+  }
+  function closeGlassPanel() {
+    glassPanel.hidden = true;
+    card.classList.remove('editing');
+  }
+  glassSlider.addEventListener('input', () => applyGlass(glassSlider.value));      // live preview
+  glassSlider.addEventListener('change', () => window.overlay?.setGlass(Number(glassSlider.value))); // save
+  glassDone.addEventListener('click', closeGlassPanel);
+  applyGlass(45);
+
   // ---- input ----
   const actions = { toggle, skip, reset };
   const onClick = (el, fn) => el.addEventListener('click', () => { fn(); el.blur(); });
@@ -105,6 +149,10 @@
   // Local keys for when the overlay itself is focused.
   window.addEventListener('keydown', e => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!glassPanel.hidden) {
+      if (e.key === 'Escape' || e.key === 'Enter') closeGlassPanel();
+      return; // let arrow keys move the slider
+    }
     const k = e.key.toLowerCase();
     if (k === ' ' || k === 'p') { e.preventDefault(); toggle(); }
     else if (k === 's' || k === 'n') skip();
@@ -113,7 +161,8 @@
 
   if (window.overlay) {
     window.overlay.onCommand(cmd => actions[cmd]?.());
-    window.overlay.onGlass(g => { document.documentElement.dataset.glass = g; });
+    window.overlay.onGlass(applyGlass);
+    window.overlay.onGlassPanel(openGlassPanel);
     window.overlay.onNotice(msg => { notice = msg; noticeUntil = Date.now() + 6000; render(); });
 
     window.overlay.info().then(({ platform, shortcuts }) => {

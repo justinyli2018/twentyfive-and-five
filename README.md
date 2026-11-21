@@ -32,13 +32,18 @@ scripts/gnome-shortcuts.sh --remove  # undo
 On other Linux desktops, bind these commands in your system keyboard settings instead:
 `npm run toggle`, `npm run skip`, `npm run reset`, `npm run show-hide`, `npm run quit`.
 
+To move the overlay from a shortcut or script: `node scripts/launch.js --corner=bottom-left`
+(also `top-left`, `top-right`, `bottom-right`).
+
 ## Menu
 
 Hover the overlay and click **⋯**, or use the tray / menu-bar icon (the coral dot), for:
 
-- **Glass**: Clear, Frosted or Solid
-- **Move to corner**
+- **Glass opacity…**: opens a slider in the overlay (0% = almost clear, 100% = solid). Click ✓ or press Esc when done.
+- **Move to**: slides the overlay to any corner of its current screen
 - **Quit**
+
+Starting or pausing plays a short click; switching between focus and break plays a chime.
 
 ## Platform notes
 

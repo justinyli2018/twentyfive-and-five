@@ -2,14 +2,12 @@
 @property --a { syntax: '<color>'; inherits: true; initial-value: #ff7a59; }
 @property --b { syntax: '<color>'; inherits: true; initial-value: #8b5cf6; }
 
-/* Glass strength (switch from the menu) */
+/* Glass strength: renderer.js sets --tint and --glow from the opacity slider */
 :root {
   --tint: rgba(16, 18, 34, 0.42);
-  --glow: 45%;
+  --glow: 36%;
   --edge: rgba(255, 255, 255, 0.34);
 }
-:root[data-glass="clear"] { --tint: rgba(255, 255, 255, 0.05); --glow: 28%; }
-:root[data-glass="solid"] { --tint: rgba(16, 18, 34, 0.88); --glow: 50%; }
 
 html, body {
   margin: 0;
@@ -87,6 +85,11 @@ body {
   margin: 4px 0 9px;
   font-variant-numeric: tabular-nums;
   letter-spacing: -.02em;
+  /* Tight dark edge + soft halo keeps the digits readable on any background */
+  text-shadow:
+    0 1px 1px rgba(0,0,0,.55),
+    0 2px 6px rgba(0,0,0,.45),
+    0 0 18px rgba(0,0,0,.25);
 }
 .paused .time { animation: breathe 2.4s ease-in-out infinite; }
 @keyframes breathe { 50% { opacity: .45; } }
@@ -134,13 +137,17 @@ button:hover { background: rgba(255,255,255,.24); }
 button:active { transform: scale(.9); }
 button:focus { outline: none; }
 button svg { width: 14px; height: 14px; }
+/* Everything inside a button is part of the button: clicks on icons go
+   through to it, and no part of it counts as the window's drag area. */
+button * { pointer-events: none; -webkit-app-region: no-drag; }
 
 .menu {
   position: absolute;
   top: 8px;
   right: 10px;
-  width: 22px;
-  height: 22px;
+  z-index: 2;
+  width: 24px;
+  height: 24px;
   background: transparent;
   border-color: transparent;
   box-shadow: none;
@@ -148,3 +155,50 @@ button svg { width: 14px; height: 14px; }
 }
 .card:hover .menu { opacity: .8; }
 .menu:hover { background: rgba(255,255,255,.18); }
+
+/* Glass opacity slider (replaces the controls while open) */
+.card.editing .controls { display: none; }
+.glass-panel {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  margin-top: 10px;
+}
+.glass-panel[hidden] { display: none; }
+.glass-panel * { -webkit-app-region: no-drag; }
+.glass-panel button { opacity: 1; flex: none; }
+.glass-value {
+  width: 34px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  opacity: .9;
+}
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]:focus { outline: none; }
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 4px;
+  background: linear-gradient(to right, rgba(255,255,255,.9) var(--fill, 45%), rgba(255,255,255,.22) var(--fill, 45%));
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: #fff;
+  border: 0;
+  box-shadow: 0 1px 4px rgba(0,0,0,.4), inset 0 -1px 2px rgba(0,0,0,.12);
+}

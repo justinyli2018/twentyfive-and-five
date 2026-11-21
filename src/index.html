@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-glass="frosted">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
@@ -8,12 +8,10 @@
 </head>
 <body>
   <main class="card paused" id="card" data-mode="focus">
-    <button class="menu" id="menuBtn" aria-label="Menu" title="Menu">
-      <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
-    </button>
     <div class="mode" id="mode">Focus</div>
     <div class="time" id="time">25:00</div>
     <div class="bar"><span id="progress"></span></div>
+
     <div class="controls">
       <button id="toggleBtn" aria-label="Start or pause"></button>
       <button id="skipBtn" aria-label="Skip">
@@ -23,6 +21,19 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/></svg>
       </button>
     </div>
+
+    <div class="glass-panel" id="glassPanel" hidden>
+      <input type="range" id="glassSlider" min="0" max="100" step="1" value="45" aria-label="Glass opacity">
+      <span class="glass-value" id="glassValue">45%</span>
+      <button id="glassDone" aria-label="Done" title="Done">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+      </button>
+    </div>
+
+    <!-- Last in the page so its clickable area sits above everything else -->
+    <button class="menu" id="menuBtn" aria-label="Menu" title="Menu">
+      <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="19" cy="12" r="2.2"/></svg>
+    </button>
   </main>
   <script src="renderer.js"></script>
 </body>
