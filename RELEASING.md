@@ -95,11 +95,11 @@ The Store signs your app for you, which also removes the SmartScreen warning for
    }
    ```
 4. On a Windows PC: `npm ci && npm run dist:msstore` produces an `.appx` in `dist/`.
-5. In Partner Center, create a submission: upload the `.appx`, add screenshots, a description, an age rating and a privacy policy URL. A short policy is enough. Say that the app stores only local settings, and that the Auto appearance briefly reads screen pixels around the overlay to measure brightness, in memory only, never saved or transmitted. Then submit. Review usually takes a few days.
+5. In Partner Center, create a submission: upload the `.appx`, add screenshots, a description, an age rating and a privacy policy URL. A short policy is enough. Say that the app stores only local settings, and that the Auto and Neutral appearances read a low-resolution view of the screen around the overlay to measure brightness, in memory only, never saved or transmitted. Then submit. Review usually takes a few days.
 
 ### Mac App Store: $99/yr (same membership as signing)
 
-The Mac App Store requires the app to run in Apple's **sandbox**. Before submitting, test that the always-on-top panel, global shortcuts, and Auto appearance (which uses Screen Recording permission) still work in a sandboxed build. In App Review notes, explain that screen access is only used to pick light or dark mode. If Apple's review or the sandbox blocks a feature, distribute the Mac version as a signed download (route A) instead.
+The Mac App Store requires the app to run in Apple's **sandbox**. Before submitting, test that the always-on-top panel, global shortcuts, Auto / Neutral appearance (Screen Recording permission) and Neutral's system blur still work in a sandboxed build. In App Review notes, explain that screen access is only used to pick light or dark mode. If Apple's review or the sandbox blocks a feature, distribute the Mac version as a signed download (route A) instead.
 
 1. In App Store Connect, create the app with your bundle ID (the `appId`).
 2. In the developer portal, create **Apple Distribution** and **Mac Installer Distribution** certificates and install them on your Mac.
@@ -119,6 +119,6 @@ The Mac App Store requires the app to run in Apple's **sandbox**. Before submitt
 ## Release checklist
 
 - [ ] Version bumped (`npm version x.y.z`)
-- [ ] App tested on each OS you ship to: always-on-top, shortcuts, transparency, tray
+- [ ] App tested on each OS you ship to: always-on-top, shortcuts, transparency, tray, Auto switching, Neutral glass blur
 - [ ] Draft release reviewed and published
 - [ ] Store submissions updated with the new build (if using stores)

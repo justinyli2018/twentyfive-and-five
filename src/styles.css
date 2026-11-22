@@ -1,29 +1,95 @@
-/* Animatable colour tokens so Focus -> Break fades smoothly */
-@property --a { syntax: '<color>'; inherits: true; initial-value: #ff7a59; }
-@property --b { syntax: '<color>'; inherits: true; initial-value: #8b5cf6; }
+/* ================================================================
+   Theme tokens
+   Every colour the theme touches is a registered custom property, so
+   switching data-theme (dark/light) or data-style (tinted/neutral) on
+   <html> animates them: the overlay fades across instead of flipping.
+   ================================================================ */
+@property --a      { syntax: '<color>';  inherits: true; initial-value: #ff7a59; }
+@property --b      { syntax: '<color>';  inherits: true; initial-value: #8b5cf6; }
+@property --fg     { syntax: '<color>';  inherits: true; initial-value: #fff; }
+@property --tint   { syntax: '<color>';  inherits: true; initial-value: rgb(16 18 34); }
+@property --ui     { syntax: '<color>';  inherits: true; initial-value: #fff; }
+@property --shade  { syntax: '<color>';  inherits: true; initial-value: #000; }
+@property --edge   { syntax: '<color>';  inherits: true; initial-value: rgb(255 255 255 / .34); }
+@property --ts1    { syntax: '<color>';  inherits: true; initial-value: rgb(0 0 0 / .55); }
+@property --ts2    { syntax: '<color>';  inherits: true; initial-value: rgb(0 0 0 / .45); }
+@property --ts3    { syntax: '<color>';  inherits: true; initial-value: rgb(0 0 0 / .25); }
+@property --sheen  { syntax: '<number>'; inherits: true; initial-value: .22; }
+@property --glow-k { syntax: '<number>'; inherits: true; initial-value: 1; }
+@property --tint-k { syntax: '<number>'; inherits: true; initial-value: 1; }
+@property --tint-min { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --frost  { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --rim    { syntax: '<number>'; inherits: true; initial-value: 0; }
 
-/* Theme tokens. main.js picks the theme (dark / light / auto) and
-   renderer.js stamps it on <html data-theme="…">.
-   --tint-a (glass opacity) and --glow come from the opacity slider. */
 :root {
-  --fg: #fff;
-  --tint-rgb: 16 18 34;      /* glass body colour */
-  --ui-rgb: 255 255 255;     /* lines, buttons, bar */
-  --shade-rgb: 0 0 0;        /* text shadow / halo */
-  --sheen: .22;              /* top highlight strength */
-  --edge: rgb(255 255 255 / .34);
+  --fade: .9s ease;
+  transition:
+    --fg var(--fade), --tint var(--fade), --ui var(--fade), --shade var(--fade),
+    --edge var(--fade), --ts1 var(--fade), --ts2 var(--fade), --ts3 var(--fade),
+    --sheen var(--fade), --glow-k var(--fade), --tint-k var(--fade),
+    --tint-min var(--fade), --frost var(--fade), --rim var(--fade);
+
+  /* set by renderer.js from the opacity slider */
   --tint-a: .42;
   --glow: 36%;
-}
-:root[data-theme="light"] {
-  --fg: #1b1d2a;
-  --tint-rgb: 250 250 253;
-  --ui-rgb: 24 26 42;
-  --shade-rgb: 255 255 255;
-  --sheen: .55;
-  --edge: rgb(255 255 255 / .75);
+  --radius: 26px;
 }
 
+/* ---- Dark (default): white text on dark glass ---- */
+:root {
+  --fg: #fff;
+  --tint: rgb(16 18 34);
+  --ui: #fff;
+  --shade: #000;
+  --edge: rgb(255 255 255 / .34);
+  --sheen: .22;
+  /* timer digits: tight dark edge + soft dark halo */
+  --ts1: rgb(0 0 0 / .55);
+  --ts2: rgb(0 0 0 / .45);
+  --ts3: rgb(0 0 0 / .25);
+}
+
+/* ---- Light: dark text on pale glass ---- */
+:root[data-theme="light"] {
+  --fg: #1b1d2a;
+  --tint: rgb(250 250 253);
+  --ui: rgb(24 26 42);
+  --shade: #fff;
+  --edge: rgb(255 255 255 / .8);
+  --sheen: .55;
+  /* timer digits: a soft dark drop shadow lifts them off the glass,
+     with a white glow behind so they stay crisp on busy backgrounds */
+  --ts1: rgb(20 22 40 / .30);
+  --ts2: rgb(20 22 40 / .16);
+  --ts3: rgb(255 255 255 / .85);
+}
+
+/* ---- Neutral glass: no colour tint, frosted, strong glass rim ---- */
+:root[data-style="neutral"] {
+  --glow-k: 0;
+  --tint-k: .75;
+  --tint-min: .5;   /* without OS blur, frost enough to soften what's behind */
+  --frost: .55;
+  --rim: 1;
+  --sheen: .3;
+  --tint: rgb(30 31 36);
+  --edge: rgb(255 255 255 / .42);
+}
+:root[data-style="neutral"][data-theme="light"] {
+  --tint: rgb(244 245 248);
+  --edge: rgb(255 255 255 / .9);
+  --sheen: .6;
+}
+/* Real OS blur behind the window (macOS, Windows 11): let it show through */
+:root[data-style="neutral"][data-native] {
+  --tint-min: .08;
+  --tint-k: .45;
+  --frost: .25;
+}
+
+/* ================================================================
+   Layout
+   ================================================================ */
 html, body {
   margin: 0;
   height: 100%;
@@ -33,7 +99,7 @@ html, body {
 body {
   box-sizing: border-box;
   padding: 10px;
-  display: grid;
+  display: block; /* card takes its natural height; the window follows it */
   color: var(--fg);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable", "Segoe UI",
                "Ubuntu", "Cantarell", Roboto, system-ui, sans-serif;
@@ -41,31 +107,45 @@ body {
   user-select: none;
   cursor: default;
 }
+/* With OS blur the window is exactly the card (see main.js) */
+:root[data-native] body { padding: 0; }
+:root[data-native] { --radius: 10px; }
 
 .card {
   --a: #ff7a59;
   --b: #8b5cf6;
   position: relative;
   overflow: hidden;
-  border-radius: 26px;
+  border-radius: var(--radius);
   padding: 12px 16px;
   text-align: center;
   background:
-    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--a) var(--glow), transparent), transparent 62%),
-    radial-gradient(120% 90% at 100% 100%, color-mix(in srgb, var(--b) var(--glow), transparent), transparent 62%),
+    radial-gradient(120% 90% at 0% 0%,
+      color-mix(in srgb, var(--a) calc(var(--glow) * var(--glow-k)), transparent), transparent 62%),
+    radial-gradient(120% 90% at 100% 100%,
+      color-mix(in srgb, var(--b) calc(var(--glow) * var(--glow-k)), transparent), transparent 62%),
     linear-gradient(150deg, rgb(255 255 255 / .20), rgb(255 255 255 / .03) 50%, rgb(255 255 255 / .09)),
-    rgb(var(--tint-rgb) / var(--tint-a));
+    color-mix(in srgb, var(--tint) calc(max(var(--tint-a), var(--tint-min)) * var(--tint-k) * 100%), transparent);
   border: 1px solid var(--edge);
   box-shadow:
+    /* glass rim: bright top-left edge, faint bottom-right (neutral only) */
+    inset 1.5px 1.5px 0 rgb(255 255 255 / calc(.55 * var(--rim))),
+    inset -1px -1px 0 rgb(255 255 255 / calc(.18 * var(--rim))),
+    inset 0 0 22px rgb(255 255 255 / calc(.10 * var(--rim))),
     inset 0 1px 1px rgb(255 255 255 / .6),
-    inset 0 -8px 22px rgb(255 255 255 / .05),
     0 4px 12px rgb(0 0 0 / .25);
-  text-shadow: 0 1px 3px rgb(var(--shade-rgb) / .35);
-  transition: --a 1.2s ease, --b 1.2s ease, color .4s ease, border-color .4s ease;
+  text-shadow: 0 1px 3px color-mix(in srgb, var(--shade) 35%, transparent);
+  transition: --a 1.2s ease, --b 1.2s ease;
   -webkit-app-region: drag; /* drag the overlay anywhere */
 }
 .card[data-mode="break"] { --a: #2dd4bf; --b: #38bdf8; }
-:root[data-theme="light"] .card { box-shadow: inset 0 1px 1px rgb(255 255 255 / .9), 0 4px 14px rgb(0 0 0 / .18); }
+:root[data-native] .card {
+  box-shadow:
+    inset 1.5px 1.5px 0 rgb(255 255 255 / calc(.55 * var(--rim))),
+    inset -1px -1px 0 rgb(255 255 255 / calc(.18 * var(--rim))),
+    inset 0 0 22px rgb(255 255 255 / calc(.10 * var(--rim))),
+    inset 0 1px 1px rgb(255 255 255 / .6);
+}
 
 /* Glossy top highlight */
 .card::before {
@@ -76,6 +156,18 @@ body {
   pointer-events: none;
   background: linear-gradient(to bottom, rgb(255 255 255 / var(--sheen)), transparent 38%);
 }
+/* Frosted grain (neutral glass) */
+.card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: var(--frost);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:where(.card > *) { position: relative; } /* keep content above the grain (zero specificity) */
 
 .card.switched { animation: pulse 1.4s ease; }
 @keyframes pulse {
@@ -97,7 +189,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: 0 22px;
+  padding: 0 24px;
 }
 .time {
   font-size: 50px;
@@ -106,21 +198,20 @@ body {
   margin: 4px 0 9px;
   font-variant-numeric: tabular-nums;
   letter-spacing: -.02em;
-  /* Tight edge + soft halo keeps the digits readable on any background
-     (dark shadow in dark mode, light glow in light mode) */
   text-shadow:
-    0 1px 1px rgb(var(--shade-rgb) / .55),
-    0 2px 6px rgb(var(--shade-rgb) / .45),
-    0 0 18px rgb(var(--shade-rgb) / .25);
+    0 1px 1px var(--ts1),
+    0 2px 6px var(--ts2),
+    0 0 18px var(--ts3);
 }
-:root[data-theme="light"] .time { font-weight: 300; }
-.paused .time { animation: breathe 2.4s ease-in-out infinite; }
-@keyframes breathe { 50% { opacity: .45; } }
+/* The paused "breathing" fade is driven from renderer.js at ~12 updates a
+   second: a CSS animation keeps Chromium redrawing at 60 fps, which costs
+   ~10% of a CPU core on machines without a working GPU. */
+.time { will-change: opacity; }
 
 .bar {
   height: 3px;
   border-radius: 3px;
-  background: rgb(var(--ui-rgb) / .2);
+  background: color-mix(in srgb, var(--ui) 20%, transparent);
   overflow: hidden;
 }
 .bar span {
@@ -128,8 +219,7 @@ body {
   height: 100%;
   width: 0;
   border-radius: inherit;
-  background: rgb(var(--ui-rgb) / .9);
-  transition: width .25s linear;
+  background: color-mix(in srgb, var(--ui) 90%, transparent);
 }
 
 .controls {
@@ -149,14 +239,14 @@ button {
   place-items: center;
   color: var(--fg);
   cursor: pointer;
-  background: rgb(var(--ui-rgb) / .12);
-  border: 1px solid rgb(var(--ui-rgb) / .26);
+  background: color-mix(in srgb, var(--ui) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ui) 26%, transparent);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .4);
   opacity: .7;
-  transition: opacity .2s, background .2s, transform .12s, color .4s;
+  transition: opacity .2s, transform .12s;
 }
 .card:hover button { opacity: 1; }
-button:hover { background: rgb(var(--ui-rgb) / .24); }
+button:hover { background: color-mix(in srgb, var(--ui) 24%, transparent); }
 button:active { transform: scale(.9); }
 button:focus { outline: none; }
 button svg { width: 14px; height: 14px; }
@@ -177,9 +267,42 @@ button * { pointer-events: none; -webkit-app-region: no-drag; }
   opacity: 0;
 }
 .card:hover .menu { opacity: .8; }
-.menu:hover { background: rgb(var(--ui-rgb) / .18); }
+.menu:hover { background: color-mix(in srgb, var(--ui) 18%, transparent); }
 
-/* Glass opacity slider (replaces the controls while open) */
+/* ---- Theme-switch countdown ring (top-left) ---- */
+.theme-ring {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+  opacity: 0;
+  transform: scale(.6);
+  transition: opacity .35s ease, transform .35s ease;
+  pointer-events: none;
+}
+.theme-ring.active { opacity: 1; transform: scale(1); }
+.theme-ring svg { width: 100%; height: 100%; overflow: visible; }
+.ring-track { fill: none; stroke: color-mix(in srgb, var(--ui) 25%, transparent); stroke-width: 2; }
+.ring-fill {
+  fill: none;
+  stroke: var(--fg);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  transform: rotate(-90deg);
+  transform-origin: 10px 10px;
+}
+.theme-ring.active .ring-fill { animation: ring-fill var(--ring-ms, 1500ms) linear forwards; }
+@keyframes ring-fill { to { stroke-dashoffset: 0; } }
+/* the centre dot previews the colour it's switching to */
+.ring-target { stroke-width: 1; }
+.theme-ring[data-to="light"] .ring-target { fill: #fff; stroke: rgb(0 0 0 / .25); }
+.theme-ring[data-to="dark"] .ring-target { fill: #1b1d2a; stroke: rgb(255 255 255 / .35); }
+
+/* ---- Glass opacity slider (replaces the controls while open) ---- */
 .card.editing .controls { display: none; }
 .glass-panel {
   -webkit-app-region: no-drag;
@@ -213,7 +336,9 @@ input[type="range"]:focus { outline: none; }
 input[type="range"]::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 4px;
-  background: linear-gradient(to right, rgb(var(--ui-rgb) / .9) var(--fill, 45%), rgb(var(--ui-rgb) / .22) var(--fill, 45%));
+  background: linear-gradient(to right,
+    color-mix(in srgb, var(--ui) 90%, transparent) var(--fill, 45%),
+    color-mix(in srgb, var(--ui) 22%, transparent) var(--fill, 45%));
 }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -225,3 +350,198 @@ input[type="range"]::-webkit-slider-thumb {
   border: 0;
   box-shadow: 0 1px 4px rgb(0 0 0 / .4), inset 0 -1px 2px rgb(0 0 0 / .12);
 }
+
+/* ================================================================
+   To-do list (todo.js)
+   ================================================================ */
+.todo {
+  position: relative;
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--ui) 16%, transparent);
+  text-align: left;
+  font-size: 13px;
+  text-shadow: none;
+}
+.todo, .todo * { -webkit-app-region: no-drag; }
+
+/* buttons inside the list don't use the round timer-button look */
+.todo button {
+  width: auto;
+  height: auto;
+  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  opacity: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+}
+.todo button:hover { background: color-mix(in srgb, var(--ui) 14%, transparent); }
+
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#todoOpen { max-height: 232px; }
+#todoDone { max-height: 130px; }
+.todo-list::-webkit-scrollbar { width: 4px; }
+.todo-list::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--ui) 30%, transparent); border-radius: 2px; }
+
+.todo-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 2px;
+  border-radius: 6px;
+}
+.todo-item:focus-within { background: color-mix(in srgb, var(--ui) 8%, transparent); }
+.todo-item.dragging {
+  z-index: 3;
+  background: color-mix(in srgb, var(--tint) 85%, transparent);
+  box-shadow: 0 4px 14px rgb(0 0 0 / .3);
+}
+
+/* room on the top row for the expand button */
+#todoOpen > .todo-item:first-child { padding-right: 46px; }
+.todo.no-open .todo-add { padding-right: 46px; }
+
+.todo-grip {
+  display: none;
+  flex: none;
+  width: 12px;
+  height: 16px;
+  opacity: 0;
+  cursor: grab;
+  touch-action: none;
+  transition: opacity .15s;
+}
+.todo-grip svg { width: 12px; height: 16px; pointer-events: none; }
+.todo.expanded #todoOpen .todo-grip { display: block; }
+.todo-item:hover .todo-grip, .todo-item.dragging .todo-grip { opacity: .55; }
+.todo-item.dragging .todo-grip { cursor: grabbing; }
+/* completed items line up with unchecked ones (which have a grip) */
+.todo.expanded #todoDone .todo-item { padding-left: 20px; }
+
+.todo .todo-check {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid color-mix(in srgb, var(--ui) 55%, transparent);
+  justify-content: center;
+  color: transparent;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.todo .todo-check svg { width: 11px; height: 11px; }
+.todo .todo-check:hover { background: color-mix(in srgb, var(--ui) 14%, transparent); }
+.todo-item.is-done .todo-check,
+.todo-item.checking .todo-check {
+  background: color-mix(in srgb, var(--ui) 80%, transparent);
+  border-color: transparent;
+  color: var(--tint); /* tick in the glass colour, on a filled box */
+}
+.todo-item.unchecking .todo-check { background: transparent; color: transparent; border-color: color-mix(in srgb, var(--ui) 55%, transparent); }
+
+.todo-text {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 2px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  cursor: text;
+}
+.todo-text::placeholder { color: color-mix(in srgb, var(--fg) 45%, transparent); }
+.todo-item.is-done .todo-text,
+.todo-item.checking .todo-text {
+  text-decoration: line-through;
+  opacity: .55;
+  transition: opacity .2s;
+}
+
+.todo .todo-del {
+  display: none;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  justify-content: center;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.todo .todo-del svg { width: 13px; height: 13px; }
+.todo.expanded .todo-del { display: inline-flex; }
+.todo-item:hover .todo-del, .todo-item:focus-within .todo-del { opacity: .7; }
+.todo .todo-del:hover { opacity: 1; }
+
+/* expand / collapse button, on the right of the top row */
+.todo .todo-expand {
+  position: absolute;
+  top: 6px;
+  right: 0;
+  z-index: 2;
+  height: 26px;
+  min-width: 26px;
+  padding: 0 6px;
+  gap: 3px;
+  justify-content: center;
+  border-radius: 13px;
+  opacity: .8;
+}
+.todo .todo-expand:hover { opacity: 1; }
+.todo-expand svg { width: 14px; height: 14px; transition: transform .2s ease; }
+.todo.expanded .todo-expand svg { transform: rotate(180deg); }
+.todo-more { font-size: 11px; font-variant-numeric: tabular-nums; opacity: .85; }
+.todo.no-open:not(.has-done) .todo-expand { display: none; }
+
+.todo .todo-add {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding: 0 2px 0 20px;
+  font: inherit;
+  opacity: .65;
+}
+.todo .todo-add:hover { opacity: 1; }
+.todo-add svg { width: 14px; height: 14px; margin: 0 1px; }
+.todo.no-open:not(.expanded) .todo-add { padding-left: 2px; }
+
+.todo-done-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--ui) 12%, transparent);
+  font-size: 12px;
+}
+.todo-done-head[hidden] { display: none; }
+.todo .todo-done-toggle { gap: 4px; padding: 2px 4px; opacity: .8; font: inherit; }
+.todo-done-toggle svg { width: 12px; height: 12px; transition: transform .2s ease; }
+.todo.show-done .todo-done-toggle svg { transform: rotate(90deg); }
+.todo .todo-clear {
+  padding: 2px 9px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 11px;
+  background: color-mix(in srgb, var(--ui) 12%, transparent);
+}
+
+/* collapsed: only the top unchecked item (or "List item" if there are none) */
+.todo:not(.expanded) #todoOpen > .todo-item:not(:first-child),
+.todo:not(.expanded) .todo-done-head,
+.todo:not(.expanded) #todoDone,
+.todo:not(.expanded):not(.no-open) .todo-add { display: none; }
+.todo:not(.show-done) #todoDone { display: none; }

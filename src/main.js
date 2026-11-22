@@ -1,9 +1,10 @@
 'use strict';
 const { app, BrowserWindow, globalShortcut, ipcMain, screen, Menu, Tray, nativeImage,
-        nativeTheme, systemPreferences } = require('electron');
+        nativeTheme, systemPreferences, powerMonitor } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
-const { measureWhiteAround } = require('./background');
+const os = require('node:os');
+const { BackgroundWatcher } = require('./background');
 
 const isMac = process.platform === 'darwin';
 const isWin = process.platform === 'win32';
@@ -56,10 +57,12 @@ const CLI = {
 const W = 260;
 const H = 176;
 const MARGIN = 14; // gap between the window and the screen edge
+const PAD = 10;     // transparent margin inside the window around the card (room for its shadow)
 const THEMES = {
   auto: 'Auto (match background)',
   dark: 'Dark',
   light: 'Light',
+  neutral: 'Neutral glass',
 };
 const CORNERS = {
   'top-left': 'Top left',
@@ -70,6 +73,7 @@ const CORNERS = {
 
 let win = null;
 let tray = null;
+let outerH = H; // full window height; grows with the to-do list
 let settings = {
   glass: 45,      // glass opacity, 0 (clear) to 100 (solid)
   theme: 'auto',  // 'auto' | 'dark' | 'light'
@@ -97,7 +101,7 @@ function cornerPosition(corner, display = screen.getPrimaryDisplay()) {
   const wa = display.workArea;
   return {
     x: corner.endsWith('left') ? wa.x + MARGIN : wa.x + wa.width - W - MARGIN,
-    y: corner.startsWith('top') ? wa.y + MARGIN : wa.y + wa.height - H - MARGIN,
+    y: corner.startsWith('top') ? wa.y + MARGIN : wa.y + wa.height - outerH - MARGIN,
   };
 }
 function defaultPosition() {
@@ -105,7 +109,7 @@ function defaultPosition() {
 }
 function startPosition() {
   if (Number.isFinite(settings.x) && Number.isFinite(settings.y)) {
-    const cx = settings.x + W / 2, cy = settings.y + H / 2;
+    const cx = settings.x + W / 2, cy = settings.y + outerH / 2;
     const onScreen = screen.getAllDisplays().some(({ workArea: b }) =>
       cx >= b.x && cy >= b.y && cx < b.x + b.width && cy < b.y + b.height);
     if (onScreen) return { x: settings.x, y: settings.y };
@@ -155,8 +159,9 @@ function createWindow() {
 
   win.webContents.on('did-finish-load', () => {
     send('glass', settings.glass);
-    sendTheme();
-    updateAutoTheme(true);
+    updateNativeGlass();
+    followSystemIfNeeded();
+    sendAppearance();
     if (failedShortcuts.length) {
       send('notice', `Shortcut taken: ${failedShortcuts.join(', ')}`);
     }
@@ -167,83 +172,198 @@ function createWindow() {
   win.on('blur', pinOnTop);
   win.on('moved', () => {
     if (slideTimer) return; // slideTo saves the final spot itself
-    const [x, y] = win.getPosition();
+    const { x, y } = outerPosition();
     settings.x = x; settings.y = y;
     saveSettings();
-    updateAutoTheme();
+    if (watcher) watcher.poke(); // new spot, new background
   });
   win.on('closed', () => { win = null; });
 
   // Fullscreen apps and some window managers can drop the flag; reassert it.
   setInterval(pinOnTop, 3000);
-  // Auto appearance: re-check what's behind the overlay.
-  setInterval(() => updateAutoTheme(), 2000);
+  // Auto / Neutral appearance: keep an eye on what's around the overlay.
+  watcher = new BackgroundWatcher({
+    getBounds: () => (win && !win.isDestroyed() && win.isVisible() ? win.getBounds() : null),
+    isWanted: () => adaptive() && !screenLocked && captureAllowed(),
+    onReading: onBackgroundReading,
+    onUnavailable: reason => {
+      debug(`screen capture ${reason}; following system setting`);
+      captureWorks = false;
+      // Declined the Wayland "Share screen" dialog: stop asking at every
+      // launch until Auto / Neutral is picked from the menu again.
+      if (reason === 'declined' && isWayland) { settings.askedScreenAccess = false; saveSettings(); }
+      followSystemIfNeeded();
+      syncNativeAppearance();
+    },
+  });
+  watcher.start();
 }
 
-// ---------- appearance (dark / light / auto) ----------
-// Auto favours dark: it only turns light when the screen right around the
-// overlay is (nearly) all white, and needs a bit less white to stay light,
-// so it doesn't flicker at the boundary.
-let autoTheme = 'dark';
-let pendingTheme = null;
-let measuring = false;
-let captureFailures = 0;
+// ---------- appearance (auto / dark / light / neutral) ----------
+// Auto and Neutral pick dark or light from what's around the overlay, and
+// favour dark: light only when the surroundings are (nearly) all white, and it
+// takes a bit less white to stay light, so it doesn't flicker at the edge.
+// A switch is announced first (a small progress ring in the overlay) and only
+// happens if the readings hold for CONFIRM_MS; the overlay then fades across.
+const CONFIRM_MS = 1500;
+const LIGHT_ON = 0.85;  // share of near-white pixels needed to turn light
+const LIGHT_OFF = 0.6;  // …and to stay light
+
+let detected = 'dark';
+let detectedOnce = false;
+let pending = null;       // { to, timer } while the progress ring runs
+let captureWorks = true;  // false once the watcher gives up
+let screenLocked = false;
+let watcher = null;
+let nativeGlass = false;  // OS blur behind the window (Neutral on macOS / Windows 11)
+
+// Set TF5_DEBUG=1 to log appearance decisions to the terminal.
+const debug = (...a) => { if (process.env.TF5_DEBUG) console.log('[appearance]', ...a); };
+
+const adaptive = () => settings.theme === 'auto' || settings.theme === 'neutral';
 
 function currentTheme() {
-  return settings.theme === 'auto' ? autoTheme : settings.theme;
-}
-function sendTheme() {
-  send('theme', currentTheme());
+  return adaptive() ? detected : settings.theme;
 }
 
-// Can we look at the screen behind the overlay?
+function sendAppearance() {
+  send('appearance', {
+    theme: currentTheme(),                                   // 'dark' | 'light'
+    style: settings.theme === 'neutral' ? 'neutral' : 'tinted',
+    nativeGlass,
+    platform: process.platform,
+  });
+}
+
+// Can we look at the screen around the overlay?
+const isWayland = isLinux && !!process.env.WAYLAND_DISPLAY;
+
 function captureAllowed() {
-  // Wayland doesn't let apps see other windows (it would ask permission every time).
-  if (isLinux && process.env.WAYLAND_DISPLAY) return false;
-  // macOS needs Screen Recording permission. Ask only after the user picks Auto
-  // from the menu, never on first launch.
+  // Ask for screen access only after the user has picked Auto or Neutral from
+  // the menu, never on a fresh install:
+  // - macOS: Screen Recording permission (asked once by the system).
+  // - Wayland (e.g. Ubuntu): the "Share screen" dialog, once per app launch.
   if (isMac && systemPreferences.getMediaAccessStatus('screen') !== 'granted' && !settings.askedScreenAccess) {
     return false;
   }
-  return captureFailures < 3; // give up after repeated failures
+  if (isWayland && !settings.askedScreenAccess) return false;
+  return captureWorks;
 }
 
-async function updateAutoTheme(immediate = false) {
-  if (settings.theme !== 'auto' || measuring || !win || win.isDestroyed() || !win.isVisible()) return;
+function cancelPending(reason = 'cancelled') {
+  if (!pending) return;
+  debug('pending', reason);
+  clearTimeout(pending.timer);
+  pending = null;
+  send('theme-pending', null);
+}
 
-  let next;
-  if (captureAllowed()) {
-    measuring = true;
-    try {
-      const white = await measureWhiteAround(win.getBounds());
-      captureFailures = 0;
-      if (white == null) return;
-      next = white >= (autoTheme === 'light' ? 0.6 : 0.85) ? 'light' : 'dark';
-    } catch {
-      captureFailures++;
-      if (captureAllowed()) return; // try again next round
-    } finally {
-      measuring = false;
-    }
+function applyDetected(theme) {
+  cancelPending('done');
+  detectedOnce = true;
+  if (theme === detected) return;
+  debug('switch ->', theme);
+  detected = theme;
+  syncNativeAppearance();
+  sendAppearance();
+}
+
+function proposeTheme(next) {
+  if (!detectedOnce) return applyDetected(next); // first reading: no countdown
+  if (next === detected) return cancelPending(); // changed back: cancel
+  if (pending && pending.to === next) return;    // already counting down
+  cancelPending();
+  debug('pending ->', next);
+  pending = { to: next, timer: setTimeout(() => applyDetected(next), CONFIRM_MS) };
+  send('theme-pending', { to: next, ms: CONFIRM_MS });
+}
+
+function onBackgroundReading(white) {
+  if (!adaptive()) return;
+  debug('reading white=' + white.toFixed(2));
+  proposeTheme(white >= (detected === 'light' ? LIGHT_OFF : LIGHT_ON) ? 'light' : 'dark');
+}
+
+// Without screen access, Auto / Neutral follow the system light/dark setting.
+function followSystemIfNeeded() {
+  if (!adaptive() || captureAllowed()) return;
+  if (nativeTheme.themeSource !== 'system') return; // we're overriding it ourselves
+  applyDetected(nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
+}
+
+// ----- Neutral: real OS blur where available -----
+function nativeGlassSupported() {
+  if (isMac) return true;
+  if (isWin) return Number(os.release().split('.')[2]) >= 22621; // Windows 11 22H2+
+  return false; // Linux: no API for blurring what's behind a window
+}
+
+// The OS material fills the whole window, so while it's on the window shrinks
+// to the card (no transparent margin). Positions are always saved for the
+// full-size window so switching modes keeps the card where it is.
+const inset = () => (nativeGlass ? PAD : 0);
+function outerPosition() {
+  const b = win.getBounds();
+  return { x: b.x - inset(), y: b.y - inset() };
+}
+function placeAt(x, y) {
+  const i = inset();
+  win.setBounds({ x: x + i, y: y + i, width: W - 2 * i, height: outerH - 2 * i });
+}
+
+// The page reports the card's height (it changes as the to-do list opens,
+// closes and gains items). Grow or shrink away from the nearest screen edge
+// so the overlay stays anchored where you put it.
+function resizeToContent(cardHeight) {
+  if (!win || win.isDestroyed() || !Number.isFinite(cardHeight)) return;
+  const wa = screen.getDisplayMatching(win.getBounds()).workArea;
+  const want = Math.min(Math.ceil(cardHeight) + 2 * PAD, wa.height);
+  if (want === outerH) return;
+  const { x, y } = outerPosition();
+  const anchorBottom = y + outerH / 2 > wa.y + wa.height / 2;
+  let ny = anchorBottom ? y + outerH - want : y;
+  ny = Math.max(wa.y, Math.min(ny, wa.y + wa.height - want));
+  outerH = want;
+  placeAt(x, ny);
+  settings.x = x; settings.y = ny;
+  saveSettings();
+}
+
+function updateNativeGlass() {
+  if (!win || win.isDestroyed()) return;
+  const want = settings.theme === 'neutral' && nativeGlassSupported();
+  if (want === nativeGlass) return;
+  const pos = outerPosition();
+  try {
+    if (isMac) win.setVibrancy(want ? 'under-window' : null);
+    if (isWin) win.setBackgroundMaterial(want ? 'acrylic' : 'none');
+    nativeGlass = want;
+  } catch {
+    nativeGlass = false;
   }
-  // No screen access: follow the system's light/dark setting instead.
-  if (!next) next = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+  placeAt(pos.x, pos.y);
+  syncNativeAppearance();
+}
 
-  if (next === autoTheme) { pendingTheme = null; return; }
-  // Require two readings in a row before switching (ignores brief flashes).
-  if (!immediate && pendingTheme !== next) { pendingTheme = next; return; }
-  pendingTheme = null;
-  autoTheme = next;
-  sendTheme();
+// The OS blur is tinted light or dark by the app's appearance; match it to the
+// detected background. Without screen access leave it to the system.
+function syncNativeAppearance() {
+  const source = nativeGlass && captureAllowed() ? detected : 'system';
+  if (nativeTheme.themeSource !== source) nativeTheme.themeSource = source;
 }
 
 function setTheme(theme) {
   settings.theme = theme;
-  if (theme === 'auto' && isMac) settings.askedScreenAccess = true;
-  captureFailures = 0;
+  if (adaptive() && (isMac || isWayland)) settings.askedScreenAccess = true;
   saveSettings();
-  sendTheme();
-  updateAutoTheme(true);
+  captureWorks = true;
+  cancelPending();
+  if (!adaptive() && watcher) watcher.release(); // Dark / Light: stop capturing entirely
+  updateNativeGlass();
+  followSystemIfNeeded();
+  syncNativeAppearance();
+  sendAppearance();
+  if (watcher) watcher.reset();
   refreshTray();
 }
 
@@ -269,7 +389,7 @@ function slideToCorner(corner) {
   if (!win) return;
   const display = screen.getDisplayMatching(win.getBounds());
   const { x: tx, y: ty } = cornerPosition(corner, display);
-  const [sx, sy] = win.getPosition();
+  const { x: sx, y: sy } = outerPosition();
   const start = Date.now();
   const duration = 420;
   clearInterval(slideTimer);
@@ -278,13 +398,13 @@ function slideToCorner(corner) {
     const t = Math.min(1, (Date.now() - start) / duration);
     const e = 1 - Math.pow(1 - t, 3); // ease-out
     // setBounds (not setPosition) so the size can't drift on scaled displays.
-    win.setBounds({ x: Math.round(sx + (tx - sx) * e), y: Math.round(sy + (ty - sy) * e), width: W, height: H });
+    placeAt(Math.round(sx + (tx - sx) * e), Math.round(sy + (ty - sy) * e));
     if (t === 1) {
       clearInterval(slideTimer);
       slideTimer = null;
       settings.x = tx; settings.y = ty;
       saveSettings();
-      updateAutoTheme(true); // new spot, new background
+      if (watcher) watcher.poke(); // new spot, new background
     }
   }, 1000 / 60);
 }
@@ -412,6 +532,39 @@ ipcMain.on('set-glass', (_e, value) => {
   settings.glass = Math.min(100, Math.max(0, Math.round(v)));
   saveSettings();
 });
+ipcMain.on('content-height', (_e, h) => resizeToContent(Number(h)));
+
+// Typing in the to-do list needs keyboard focus, which the overlay normally
+// never takes on Windows (so clicks don't pull focus from your work).
+ipcMain.handle('want-focus', (_e, on) => {
+  if (!win || win.isDestroyed()) return false;
+  if (on) {
+    if (isWin) win.setFocusable(true);
+    win.focus();
+  } else if (isWin) {
+    win.blur();
+    win.setFocusable(false);
+  }
+  return true;
+});
+
+// ---------- to-do list storage ----------
+const todosFile = () => path.join(app.getPath('userData'), 'todos.json');
+ipcMain.handle('todos-load', () => {
+  try { return JSON.parse(fs.readFileSync(todosFile(), 'utf8')); } catch { return null; }
+});
+ipcMain.on('todos-save', (_e, data) => {
+  if (!data || !Array.isArray(data.items)) return;
+  const items = data.items
+    .filter(i => i && typeof i.id === 'string')
+    .map(i => ({ id: i.id.slice(0, 40), text: String(i.text || '').slice(0, 500), done: !!i.done }))
+    .slice(0, 500);
+  try {
+    fs.mkdirSync(path.dirname(todosFile()), { recursive: true });
+    fs.writeFileSync(todosFile(), JSON.stringify({ items, showDone: !!data.showDone }));
+  } catch {}
+});
+
 ipcMain.handle('info', () => ({ platform: process.platform, shortcuts: SHORTCUTS }));
 
 // ---------- app lifecycle ----------
@@ -427,7 +580,12 @@ if (!gotLock) {
   app.whenReady().then(() => {
     if (isMac && app.dock) app.dock.hide(); // overlay-only app, no Dock icon
     loadSettings();
-    nativeTheme.on('updated', () => updateAutoTheme(true));
+    nativeTheme.on('updated', followSystemIfNeeded);
+    // Don't watch the screen while it's locked or asleep.
+    powerMonitor.on('lock-screen', () => { screenLocked = true; });
+    powerMonitor.on('unlock-screen', () => { screenLocked = false; });
+    powerMonitor.on('suspend', () => { screenLocked = true; });
+    powerMonitor.on('resume', () => { screenLocked = false; });
     registerShortcuts();
     createTray();
     // Linux compositors sometimes paint a transparent window black if it's

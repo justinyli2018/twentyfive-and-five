@@ -54,22 +54,34 @@
     return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
   }
 
+  // Only touch the page when something visible changed: with no GPU (common
+  // on Linux) every repaint costs CPU, so this keeps the overlay nearly idle.
   let lastReport = '', lastIcon = '';
+  const shown = {};
+  function put(key, value, apply) {
+    if (shown[key] === value) return;
+    shown[key] = value;
+    apply(value);
+  }
   function render() {
     const t = fmt(remaining);
-    timeEl.textContent = t;
+    put('time', t, v => { timeEl.textContent = v; });
 
-    if (notice && Date.now() < noticeUntil) modeEl.textContent = notice;
-    else modeEl.textContent = !running && remaining === DUR[mode] ? `${LABEL[mode]} · ready` : LABEL[mode];
+    const label = notice && Date.now() < noticeUntil ? notice
+      : !running && remaining === DUR[mode] ? `${LABEL[mode]} · ready` : LABEL[mode];
+    put('label', label, v => { modeEl.textContent = v; });
 
-    progress.style.width = (100 * (1 - remaining / DUR[mode])).toFixed(2) + '%';
-    card.dataset.mode = mode;
-    card.classList.toggle('paused', !running);
+    // Progress from the displayed seconds, so the bar moves when the digits do.
+    const secsLeft = Math.max(0, Math.ceil(remaining / 1000));
+    const pct = (100 * (1 - (secsLeft * 1000) / DUR[mode])).toFixed(2) + '%';
+    put('bar', pct, v => { progress.style.width = v; });
+    put('mode', mode, v => { card.dataset.mode = v; });
+    put('paused', !running, v => card.classList.toggle('paused', v));
 
     const icon = running ? 'pause' : 'play';
     if (icon !== lastIcon) { toggleBtn.innerHTML = running ? ICON_PAUSE : ICON_PLAY; lastIcon = icon; }
 
-    document.title = `${t} · ${LABEL[mode]}`;
+    put('title', `${t} · ${LABEL[mode]}`, v => { document.title = v; });
     const report = `${t}|${mode}|${running}`;
     if (report !== lastReport) {
       lastReport = report;
@@ -138,6 +150,28 @@
   glassDone.addEventListener('click', closeGlassPanel);
   applyGlass(45);
 
+  // ---- appearance ----
+  // Colours live in CSS custom properties that animate, so changing
+  // data-theme / data-style fades the whole overlay across (styles.css).
+  const themeRing = $('themeRing');
+  function applyAppearance({ theme, style, nativeGlass, platform }) {
+    root.dataset.theme = theme === 'light' ? 'light' : 'dark';
+    root.dataset.style = style === 'neutral' ? 'neutral' : 'tinted';
+    root.dataset.platform = platform || '';
+    if (nativeGlass) root.dataset.native = '';
+    else delete root.dataset.native;
+  }
+
+  // Progress ring shown while a detected change is being confirmed.
+  function showPending(p) {
+    if (!p) { themeRing.classList.remove('active'); return; }
+    themeRing.dataset.to = p.to;
+    themeRing.title = `Switching to ${p.to} in a moment`;
+    themeRing.style.setProperty('--ring-ms', `${p.ms}ms`);
+    themeRing.classList.remove('active');
+    void themeRing.offsetWidth; // restart the fill animation
+    themeRing.classList.add('active');
+  }
   // ---- input ----
   const actions = { toggle, skip, reset };
   const onClick = (el, fn) => el.addEventListener('click', () => { fn(); el.blur(); });
@@ -149,6 +183,7 @@
   // Local keys for when the overlay itself is focused.
   window.addEventListener('keydown', e => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target.closest && e.target.closest('.todo')) return; // typing in the to-do list
     if (!glassPanel.hidden) {
       if (e.key === 'Escape' || e.key === 'Enter') closeGlassPanel();
       return; // let arrow keys move the slider
@@ -163,7 +198,8 @@
     window.overlay.onCommand(cmd => actions[cmd]?.());
     window.overlay.onGlass(applyGlass);
     window.overlay.onGlassPanel(openGlassPanel);
-    window.overlay.onTheme(theme => { root.dataset.theme = theme === 'light' ? 'light' : 'dark'; });
+    window.overlay.onAppearance(applyAppearance);
+    window.overlay.onThemePending(showPending);
     window.overlay.onNotice(msg => { notice = msg; noticeUntil = Date.now() + 6000; render(); });
 
     window.overlay.info().then(({ platform, shortcuts }) => {
@@ -175,6 +211,18 @@
       menuBtn.title = `Menu · show/hide: ${nice(shortcuts.visibility)}`;
     });
   }
+
+  // Paused "breathing": a slow fade of the digits, updated ~12× a second.
+  let breathStart = 0;
+  setInterval(() => {
+    if (running) {
+      if (breathStart) { breathStart = 0; timeEl.style.opacity = ''; }
+      return;
+    }
+    if (!breathStart) breathStart = performance.now();
+    const phase = ((performance.now() - breathStart) / 2400) * 2 * Math.PI;
+    timeEl.style.opacity = (0.725 + 0.275 * Math.cos(phase)).toFixed(2); // 1 → 0.45 → 1
+  }, 83);
 
   setInterval(update, 250);
   render();
